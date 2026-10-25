@@ -60,6 +60,37 @@ Butuh: browser Chrome/Chromium dengan `--remote-debugging-port=9222` (
 | `scroll` | scroll down/up |
 | `eval` | jalankan JavaScript ( power user ) |
 | `screenshot` | fallback untuk canvas/chart/map only |
+| `api_snapshot` | **scoping killer: ambil semua response body API ( JSON mentah )** |
+| `watch_response` | tunggu endpoint spesifik, ambil body JSON-nya |
+| `block_junk` | block image/font/css/analytics, ringankan load |
+
+## Network layer: keunggulan utama untuk scraping
+
+SPA web3 / dashboard biasanya mengambil data dari API JSON. Daripada
+me-render halaman dan mem-parsing teks-nya, **ambi response body-nya secara
+langsung** — zero DOM parsing.
+
+Diukur di ryfinite.com/app:
+
+```
+api_snapshot  → 6 API calls, JSON terstruktur:
+  /api/user/me        → {user: {id, email, image, ...}}
+  /api/user/dashboard → tokens: ETH=0, RFN=0, USDT=0
+  /api/notifications  → {notifications: []}
+  /api/mine           → 3108 bytes
+```
+
+| Metode | Waktu | Token | Datanya |
+|---|---|---|---|
+| `api_snapshot` | 7.0s | ~1569 | **JSON terstruktur ( akurat ) |
+| `read_page` | 3.1s | ~151 | Teks UI ( harus diparse lagi ) |
+
+`read_page` untuk eksplorasi ( token sangat hemat ), `api_snapshot` saat
+butuh data akurat untuk scraping. Keduanya berbasis teks, keduanya 10-100x
+lebih murah dari Browser Use.
+
+`block_junk` memblokir 15+ resource sia-sia ( gambar/font/css/analytics )
+agar halaman lebih ringan — untuk situs yang bandwidth/stat-nya berat.
 
 ## Contoh alur agent
 

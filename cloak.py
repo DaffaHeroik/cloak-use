@@ -429,3 +429,140 @@ def screenshot(path=None):
             f.write(data)
         return {"path": path, "bytes": len(data)}
     return {"bytes": len(data), "note": "not saved (no path)"}
+
+
+# ---------------------------------------------------------------------------
+# Network layer — ini senjata scraping: baca API response JSON langsung
+# ---------------------------------------------------------------------------
+
+_JUNK_PATTERNS = [
+    "*.svg", "*.png", "*.webp", "*.jpg", "*.jpeg", "*.gif", "*.ico",
+    "*.woff2", "*.woff", "*.ttf",
+    "*.css",
+    "*google-analytics.com*", "*googletagmanager.com*",
+    "*analytics*", "*sentry.io*", "*doubleclick*",
+]
+
+
+def net_enable():
+    """Aktifkan Network domain — wajib sebelum net_* lainnya."""
+    send("Network.enable", timeout=10)
+
+
+def block_junk(on=True, extra=None):
+    """Block resource yang gak perlu (image/font/css/analytics tracker).
+
+    Efek: page load jauh lebih ringan. Cocok buat scraping dimana kita hanya
+    butuh teks / API JSON, bukan tampilan. MATIkan lagi dengan block_junk(False)
+    sebelum membuka halaman yang butuh visual.
+    """
+    if not on:
+        send("Network.setBlockedURLs", {"urls": []}, timeout=10)
+        return {"blocking": False}
+    urls = list(_JUNK_PATTERNS)
+    if extra:
+        urls.extend(extra)
+    send("Network.setBlockedURLs", {"urls": urls}, timeout=10)
+    return {"blocking": True, "patterns": len(urls)}
+
+
+def net_events():
+    """Pop collected network events (requestWillBeSent, loadingFinished, dll)."""
+    with _lock:
+        out, _events[:] = _events[:], []
+        return out
+
+
+def api_snapshot(filter_api=True, max_bodies=30):
+    """Snapshot SEMUA request + response body di halaman aktif.
+
+    Ini killer feature buat scraping: halaman web3/SPA biasanya nyedot JSON
+    dari API. Kita ambil response body-nya LANGSUNG — zero DOM parsing,
+    zero AX tree, zero screenshot. Cuma JSON mentah.
+
+    filter_api=True: cuma XHR/Fetch (API calls), skip script/css/image.
+    Return: list of {url, method, status, mime, body (kalau JSON/kecil)}.
+    """
+    send("Network.enable", timeout=10)  # pastikan domain aktif
+    events = net_events()
+    reqs = {}
+    finished = {}
+    for e in events:
+        m = e.get("method")
+        p = e.get("params", {})
+        if m == "Network.requestWillBeSent":
+            reqs[p["requestId"]] = {
+                "url": p["request"]["url"],
+                "method": p["request"]["method"],
+                "type": p.get("type"),
+            }
+        elif m == "Network.loadingFinished":
+            finished[p["requestId"]] = p.get("response", {})
+
+    out = []
+    for rid, req in reqs.items():
+        if filter_api and req["type"] not in ("XHR", "Fetch"):
+            continue
+        # skip Next.js RSC chunks dan analytics tracker — bukan data, cuma noise
+        if filter_api:
+            u = req["url"]
+            if "_rsc=" in u or "google-analytics" in u or "googletagmanager" in u:
+                continue
+            if u.endswith("/view") and req["method"] == "POST":
+                continue
+        item = {
+            "url": req["url"],
+            "method": req["method"],
+            "type": req["type"],
+        }
+        resp = finished.get(rid)
+        if resp:
+            item["status"] = resp.get("status")
+            item["mime"] = resp.get("mimeType")
+        # ambil body kalau JSON/kecil
+        try:
+            r = send("Network.getResponseBody", {"requestId": rid}, timeout=8)
+            body = r.get("body", "")
+            if body and not r.get("base64Encoded") and len(body) < 20000:
+                item["body"] = body
+        except Exception:
+            pass
+        out.append(item)
+        if len(out) >= max_bodies:
+            break
+    return {"count": len(out), "api_calls": out}
+
+
+def watch_response(url_pattern, max_wait=15):
+    """Tunggu sampai ada response dari URL yang match pattern, ambil body-nya.
+
+    Buat scraping endpoint spesifik: 'kasih body GET /api/user/dashboard'.
+    Langsung kasih JSON-nya tanpa harus parse halaman sama sekali.
+    """
+    import fnmatch
+    events = net_events()
+    reqs = {}
+    for e in events:
+        if e.get("method") == "Network.requestWillBeSent":
+            p = e["params"]
+            reqs[p["requestId"]] = p["request"]["url"]
+
+    end = time.time() + max_wait
+    while time.time() < end:
+        events = net_events()
+        for e in events:
+            if e.get("method") == "Network.loadingFinished":
+                rid = e["params"]["requestId"]
+                url = reqs.get(rid)
+                if url and fnmatch.fnmatch(url, url_pattern):
+                    try:
+                        r = send("Network.getResponseBody", {"requestId": rid}, timeout=8)
+                        return {
+                            "url": url,
+                            "status": e["params"].get("response", {}).get("status"),
+                            "body": r.get("body", ""),
+                        }
+                    except Exception as ex:
+                        return {"url": url, "error": str(ex)}
+        wait(0.4)
+    return {"error": f"timeout menunggu response match {url_pattern}"}

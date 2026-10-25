@@ -140,6 +140,37 @@ TOOLS = [
             "properties": {"path": {"type": "string"}},
         },
     },
+    {
+        "name": "api_snapshot",
+        "description": "Killer feature scraping: ambil SEMUA response body API (JSON mentah) dari halaman aktif. Zero DOM parsing. Jalankan setelah halaman load.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "filter_api": {"type": "boolean", "default": True},
+                "max_bodies": {"type": "integer", "default": 30},
+            },
+        },
+    },
+    {
+        "name": "watch_response",
+        "description": "Tunggu response dari endpoint spesifik (pattern) lalu ambil body JSON-nya. Misal '/api/user/dashboard'. Langsung dapat tanpa parse halaman.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "url_pattern": {"type": "string"},
+                "max_wait": {"type": "integer", "default": 15},
+            },
+            "required": ["url_pattern"],
+        },
+    },
+    {
+        "name": "block_junk",
+        "description": "Block resource tidak perlu (image/font/css/analytics). Ringankan page load untuk scraping. Matikan dengan on=false.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"on": {"type": "boolean", "default": True}},
+        },
+    },
 ]
 
 
@@ -203,6 +234,18 @@ async def dispatch(name, args):
         return {"value": v}
     if name == "screenshot":
         return cloak.screenshot(args.get("path"))
+    if name == "api_snapshot":
+        return cloak.api_snapshot(
+            filter_api=args.get("filter_api", True),
+            max_bodies=args.get("max_bodies", 30),
+        )
+    if name == "watch_response":
+        return cloak.watch_response(
+            url_pattern=args["url_pattern"],
+            max_wait=args.get("max_wait", 15),
+        )
+    if name == "block_junk":
+        return cloak.block_junk(on=args.get("on", True))
     raise ValueError(f"unknown tool: {name}")
 
 
