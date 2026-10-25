@@ -467,8 +467,25 @@ def block_junk(on=True, extra=None):
 
 
 def net_events():
-    """Pop collected network events (requestWillBeSent, loadingFinished, dll)."""
+    """Pop collected network events (requestWillBeSent, loadingFinished, dll).
+
+    Juga drain socket dulu — CDP events baru datang saat socket dibaca, dan
+    socket cuma dibaca saat send()/js() dipanggil. Tanpa drain di sini, loop
+    poll (watch_response) gak pernah liat event baru.
+    """
     with _lock:
+        # baca pending messages dari socket tanpa nunggu response
+        try:
+            _ws.settimeout(0.3)
+            while True:
+                try:
+                    m = json.loads(_ws.recv())
+                except Exception:
+                    break
+                if m.get("method"):
+                    _events.append(m)
+        except Exception:
+            pass
         out, _events[:] = _events[:], []
         return out
 
@@ -540,29 +557,28 @@ def watch_response(url_pattern, max_wait=15):
     Langsung kasih JSON-nya tanpa harus parse halaman sama sekali.
     """
     import fnmatch
-    events = net_events()
+    send("Network.enable", timeout=10)
     reqs = {}
-    for e in events:
-        if e.get("method") == "Network.requestWillBeSent":
-            p = e["params"]
-            reqs[p["requestId"]] = p["request"]["url"]
-
+    finished = {}
     end = time.time() + max_wait
     while time.time() < end:
-        events = net_events()
-        for e in events:
-            if e.get("method") == "Network.loadingFinished":
-                rid = e["params"]["requestId"]
+        for e in net_events():
+            m = e.get("method")
+            p = e.get("params", {})
+            if m == "Network.requestWillBeSent":
+                reqs[p["requestId"]] = p["request"]["url"]
+            elif m == "Network.loadingFinished":
+                rid = p["requestId"]
                 url = reqs.get(rid)
                 if url and fnmatch.fnmatch(url, url_pattern):
+                    # response selesai di-transfer, body sekarang bisa diambil
                     try:
                         r = send("Network.getResponseBody", {"requestId": rid}, timeout=8)
                         return {
                             "url": url,
-                            "status": e["params"].get("response", {}).get("status"),
                             "body": r.get("body", ""),
                         }
                     except Exception as ex:
                         return {"url": url, "error": str(ex)}
-        wait(0.4)
+        wait(0.3)
     return {"error": f"timeout menunggu response match {url_pattern}"}
