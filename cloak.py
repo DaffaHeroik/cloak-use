@@ -228,8 +228,12 @@ def _ax_role(n):
     return n.get("role", {}).get("value")
 
 
-def read_page(max_nodes=1500, include="interactive"):
+def read_page(max_nodes=1500, include="interactive", tree=None):
     """Baca halaman sebagai TEXT dari Accessibility tree.
+
+    tree: opsional, hasil wait_for_load(return_tree=True) atau poll sendiri.
+    Kalikasih, kita skip getFullAXTree (hemat ~1s). 'goto_fast' menggabungkan
+    keduanya jadi 1 panggilan.
 
     include:
       'interactive' — link, button, textbox, menuitem, tab, dll (default).
@@ -239,8 +243,9 @@ def read_page(max_nodes=1500, include="interactive"):
 
     Return dict: url, title, node count, dan lines (role: name).
     """
-    ax = send("Accessibility.getFullAXTree", timeout=60)
-    nodes = ax.get("nodes", [])
+    if tree is None:
+        tree = send("Accessibility.getFullAXTree", timeout=60)
+    nodes = tree.get("nodes", [])
     title = js("document.title")
     url = js("location.href")
 
@@ -347,23 +352,68 @@ def scroll(direction="down", amount=3):
     return {"scrolled": direction, "amount": amount}
 
 
-def wait_for_load(timeout=15):
-    """Tunggu sampai loading settle."""
+def wait_for_load(timeout=15, return_tree=False):
+    """Tunggu sampai loading settle — readyState + AX tree stabil.
+
+    readyState=complete itu stage DOM parsed, BUKAN stage SPA selesai render.
+    Angular/React/Next biasanya render dampak setelah itu. Kalau kita langsung
+    baca, AX tree-nya masih kosong / setengah. Makanya kita poll AX tree sampai
+    node count-nya stabil 2 poll berturut-turut.
+
+    return_tree=True: kasih back tree terakhir (sudah di-fetch anyway) supaya
+    read_page gak perlu getFullAXTree LAGI (hemat ~1s per page read).
+    """
+    # Stage 1: readyState
     end = time.time() + timeout
     while time.time() < end:
-        ready = js("document.readyState")
-        if ready == "complete":
+        if js("document.readyState") == "complete":
             break
+        wait(0.2)
+    # Stage 2: AX tree — tunggu sampai ada node lalu stabil
+    tree = None
+    prev = -1
+    stable = 0
+    end = time.time() + min(timeout, 8)
+    while time.time() < end:
+        try:
+            r = send("Accessibility.getFullAXTree", timeout=10)
+            n = len(r.get("nodes", []))
+            if n > 0:
+                tree = r
+        except Exception:
+            break
+        if n == prev and n > 0:
+            stable += 1
+            if stable >= 1:
+                break
+        else:
+            stable = 0
+        prev = n
         wait(0.3)
-    wait(0.5)
+    wait(0.2)
+    if return_tree:
+        return tree
 
 
-def goto(url, wait_ms=2000):
-    """Navigate tab ke URL baru."""
+def goto(url, wait_ms=1200):
+    """Navigate tab ke URL baru, lalu tunggu render SPA settle."""
     send("Page.navigate", {"url": url})
     wait(wait_ms / 1000.0)
     wait_for_load(timeout=10)
     return {"url": url, "title": js("document.title")}
+
+
+def goto_fast(url, include="interactive", max_nodes=1500):
+    """Navigate + baca halaman dalam SATU putaran.
+
+    Kompak: navigate -> tunggu SPA settle (AX tree terbentuk) -> langsung
+    extract lines dari tree yang sama. Skip 1 AX fetch + 1 round trip.
+
+    vs goto()+read_page(): hemat ~1.5-2s per navigasi.
+    """
+    send("Page.navigate", {"url": url})
+    tree = wait_for_load(timeout=10, return_tree=True)
+    return read_page(max_nodes=max_nodes, include=include, tree=tree)
 
 
 def screenshot(path=None):

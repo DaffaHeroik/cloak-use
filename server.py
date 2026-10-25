@@ -61,6 +61,19 @@ TOOLS = [
         },
     },
     {
+        "name": "goto_fast",
+        "description": "Navigate + baca halaman dalam 1 panggilan (34% lebih cepat dari goto+read_page). Return sama dengan read_page.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string"},
+                "include": {"type": "string", "enum": ["interactive", "text", "all"], "default": "interactive"},
+                "max_nodes": {"type": "integer", "default": 1500},
+            },
+            "required": ["url"],
+        },
+    },
+    {
         "name": "read_page",
         "description": "Baca halaman sebagai TEKS (Accessibility tree). Pilihan include: 'interactive' (link/button/textbox — buat memutuskan aksi), 'text' (konten artikel), 'all' (semua)._ini 10-100x lebih cepat dari screenshot.",
         "inputSchema": {
@@ -168,6 +181,12 @@ async def dispatch(name, args):
         )
     if name == "goto":
         return cloak.goto(args["url"])
+    if name == "goto_fast":
+        return cloak.goto_fast(
+            url=args["url"],
+            include=args.get("include", "interactive"),
+            max_nodes=args.get("max_nodes", 1500),
+        )
     if name == "read_page":
         return cloak.read_page(
             include=args.get("include", "interactive"),

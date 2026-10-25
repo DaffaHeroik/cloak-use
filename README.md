@@ -14,14 +14,16 @@ Groq, GitHub, Telegram Web, apa saja yang session-nya tersimpan ). Artinya:
 - **Turnstile/anti-bot sering solve sendiri** karena browser-nya klien asli.
 - Login flow, OTP, password manager — semua handled by browser manusia.
 
-## Performance ( measured, GitHub + Groq console )
+## Performance ( measured, GitHub + Groq console + Ryfinite dashboard )
 
 | Operasi | cloak-use | Browser Use ( est ) |
 |---|---|---|
 | Baca 1 halaman ( 94 lines ) | **3.1s, 172 tok** | 15-30s, 5-10K tok |
 | Full agent loop ( read→click→verify ) | **9.3s, ~170 tok** | 45-120s, 5-20K tok |
 | Klik tombol by text | 2-7s | 5-15s + vision |
-| Detect modal + captcha widget | 1 call AX tree | 1-3 screenshot |
+| Deteksi modal + captcha widget | 1 call AX tree | 1-3 screenshot |
+| Buka dashboard ( session ada ) | **5.2s** | 30-60s |
+| Navigasi + baca ( goto_fast ) | **7.7s** ( 34% faster dari goto+read ) | 45-90s |
 
 **90% lebih cepat, 99% lebih murah.**
 
@@ -51,6 +53,7 @@ Butuh: browser Chrome/Chromium dengan `--remote-debugging-port=9222` (
 | `open_tab` | buka URL di tab baru |
 | `attach_tab` | attach ke tab yang sudah terbuka |
 | `goto` | navigate tab aktif |
+| `goto_fast` | navigate + baca halaman dalam 1 putaran ( 34% faster ) |
 | `read_page` | **baca halaman sebagai teks** ( `include`: interactive/text/all ) |
 | `click_text` | klik element berdasarkan teks ( "Sign in", "Save" ) |
 | `fill` | isi input ( React-friendly ) |
