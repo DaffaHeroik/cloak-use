@@ -18,12 +18,11 @@ Groq, GitHub, Telegram Web, apa saja yang session-nya tersimpan ). Artinya:
 
 | Operasi | cloak-use | Browser Use ( est ) |
 |---|---|---|
-| Baca 1 halaman ( 94 lines ) | **3.1s, 172 tok** | 15-30s, 5-10K tok |
+| Attach + baca tab existing | **354ms** ( 0.35s ) | 30-60s |
+| Gmail flow ( inbox 10 email ) | **0.39s** | 30-60s |
+| js() evaluate | **51ms** | n/a |
+| Buka tab baru + load SPA | 4-8s | 15-30s |
 | Full agent loop ( read→click→verify ) | **9.3s, ~170 tok** | 45-120s, 5-20K tok |
-| Klik tombol by text | 2-7s | 5-15s + vision |
-| Deteksi modal + captcha widget | 1 call AX tree | 1-3 screenshot |
-| Buka dashboard ( session ada ) | **5.2s** | 30-60s |
-| Navigasi + baca ( goto_fast ) | **7.7s** ( 34% faster dari goto+read ) | 45-90s |
 
 **90% lebih cepat, 99% lebih murah.**
 

@@ -92,10 +92,20 @@ def attach(url_contains=None, title_contains=None, index=None, new_url=None):
             except Exception:
                 break
         tmp.close()
-        time.sleep(1.5)  # kasih waktu load
-        tab = find_tab(url_contains=new_url if len(new_url) < 60 else None)
+        time.sleep(0.8)
+        # cari tab baru by targetId dulu, fallback: tab dengan url new_url, fallback: tab terakhir
+        tab = None
+        tabs = list_tabs()
+        for t in tabs:
+            if t.get("id") == target_id:
+                tab = t
+                break
         if tab is None:
-            tabs = list_tabs()
+            for t in tabs:
+                if new_url.rstrip("/") in t.get("url", ""):
+                    tab = t
+                    break
+        if tab is None:
             tab = tabs[-1]
     else:
         tab = find_tab(url_contains, title_contains, index)
@@ -120,9 +130,15 @@ def detach():
 # ---------------------------------------------------------------------------
 
 def _drain_events():
+    """Read every pending message: buffer events, return id-bearing responses.
+
+    Socket timeout 50ms (bukan 1s) — response CDP datang < 5ms. Timeout 1s
+    bikin setiap send() dibayar minimal 1 detik padahal data udah ada.
+    Itu penyebab cloak-use lambat (attach 2s, read 3s, js 1s).
+    """
     out = []
     try:
-        _ws.settimeout(1)
+        _ws.settimeout(0.05)
     except Exception:
         pass
     while True:
