@@ -125,6 +125,29 @@ def detach():
     _connected_tab = None
 
 
+def ensure_attached(url_contains=None):
+    """Wajib sebelum js/send — auto-attach ke tab pertama kalau belum ada
+    koneksi. Tanpa ini, tool MCP di process baru (atau setelah detach) gagal
+    dengan '_ws None'."""
+    global _ws, _connected_tab
+    if _ws is not None:
+        return
+    tab = find_tab(url_contains=url_contains) if url_contains else None
+    if tab is None:
+        tabs = list_tabs()
+        for t in reversed(tabs):
+            if t.get("url", "").startswith(("http", "data:")):
+                tab = t
+                break
+        if tab is None:
+            tab = tabs[-1] if tabs else None
+    if tab is None:
+        raise RuntimeError("tidak ada tab untuk di-attach")
+    connect(tab["webSocketDebuggerUrl"])
+    send("Page.enable")
+    send("Runtime.enable")
+
+
 # ---------------------------------------------------------------------------
 # Low-level CDP
 # ---------------------------------------------------------------------------
@@ -229,6 +252,84 @@ def drain_events():
     with _lock:
         out, _events[:] = _events[:], []
         return out
+
+
+def close_tab(index=None, url_contains=None):
+    """Tutup tab (default: tab aktif yang di-attach)."""
+    tab = None
+    if _connected_tab:
+        for t in list_tabs():
+            if t.get("webSocketDebuggerUrl") == _connected_tab:
+                tab = t
+                break
+    if tab is None:
+        tab = find_tab(url_contains=url_contains, index=index)
+    if tab is None:
+        raise RuntimeError("tab tidak ketemu untuk ditutup")
+    detach()
+    with urllib.request.urlopen(f"http://{HOST}:{PORT}/json/close/{tab['id']}", timeout=5):
+        pass
+    return {"closed": tab.get("url", "")[:80]}
+
+
+def press_key(key):
+    """Klik keyboard: 'Enter', 'Tab', 'Escape', 'a', dll."""
+    down = {"type": "keyDown", "key": key}
+    if len(key) == 1:
+        down["text"] = key
+    send("Input.dispatchKeyEvent", down)
+    send("Input.dispatchKeyEvent", {"type": "keyUp", "key": key})
+    return {"key": key}
+
+
+def select_option(selector, value):
+    """Pilih option di <select> (native setter + change event, React-friendly)."""
+    js(f"""
+    (() => {{
+      const el = document.querySelector({json.dumps(selector)});
+      if (!el) throw new Error('select not found: {selector}');
+      if (el.tagName !== 'SELECT') throw new Error('not a <select>: {selector}');
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(el, {json.dumps(str(value))});
+      el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+      return el.value;
+    }})()
+    """)
+    return {"selector": selector, "value": value}
+
+
+def upload_file(selector, path):
+    """Upload file ke <input type=file> via CDP DOM.setFileInputFiles."""
+    import os
+    path = os.path.abspath(path)
+    if not os.path.exists(path):
+        raise RuntimeError(f"file tidak ada: {path}")
+    doc = send("DOM.getDocument", {"depth": 0}, timeout=10)
+    found = send("DOM.querySelectorAll", {"nodeId": doc["root"]["nodeId"], "selector": selector}, timeout=10)
+    nodes = found.get("nodeIds", [])
+    if not nodes:
+        raise RuntimeError(f"input file tidak ketemu: {selector}")
+    send("DOM.setFileInputFiles", {"files": [path], "nodeId": nodes[0]}, timeout=10)
+    return {"path": path, "selector": selector}
+
+
+def wait_for_text(text, timeout=30, expect=True):
+    """Tunggu sampai teks muncul (expect=True) / hilang (expect=False) di body.
+
+    Poll 300ms via DOM textContent — ~50ms per poll, bukan read_page (3s).
+    Agent paling sering stuck di sini: 'sudah klik, tapi hasil belum render'.
+    """
+    t0 = time.time()
+    end = t0 + timeout
+    last = ""
+    last_found = not expect
+    while time.time() < end:
+        last = js("document.body ? document.body.innerText : ''") or ""
+        last_found = text in last
+        if last_found == expect:
+            return {"found": last_found, "text": text, "waited_s": round(time.time() - t0, 1)}
+        time.sleep(0.3)
+    return {"found": last_found, "text": text, "timeout": True, "body_tail": last[-300:]}
 
 
 # ---------------------------------------------------------------------------
@@ -389,6 +490,7 @@ def wait_for_load(timeout=15, return_tree=False):
     tree = None
     prev = -1
     stable = 0
+    n = 0
     end = time.time() + min(timeout, 8)
     while time.time() < end:
         try:

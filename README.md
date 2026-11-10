@@ -43,7 +43,7 @@ python3 server.py serve
 Butuh: browser Chrome/Chromium dengan `--remote-debugging-port=9222` (
 `Cloak` / anti-detect browser ) di mesin yang sama.
 
-## Tools ( 11 )
+## Tools (25)
 
 | Tool | Kegunaan |
 |---|---|
@@ -51,17 +51,45 @@ Butuh: browser Chrome/Chromium dengan `--remote-debugging-port=9222` (
 | `list_tabs` | daftar tab ( url, title ) |
 | `open_tab` | buka URL di tab baru |
 | `attach_tab` | attach ke tab yang sudah terbuka |
+| `close_tab` | tutup tab aktif / tab tertentu |
 | `goto` | navigate tab aktif |
 | `goto_fast` | navigate + baca halaman dalam 1 putaran ( 34% faster ) |
 | `read_page` | **baca halaman sebagai teks** ( `include`: interactive/text/all ) |
 | `click_text` | klik element berdasarkan teks ( "Sign in", "Save" ) |
 | `fill` | isi input ( React-friendly ) |
+| `select_option` | pilih option di `<select>` |
+| `upload_file` | upload file ke `<input type=file>` |
+| `press_key` | tekan tombol keyboard ( Enter, Tab, Escape ) |
+| `wait_for_text` | **tunggu teks muncul/hilang** — poll DOM 300ms, murah |
 | `scroll` | scroll down/up |
 | `eval` | jalankan JavaScript ( power user ) |
 | `screenshot` | fallback untuk canvas/chart/map only |
-| `api_snapshot` | **scoping killer: ambil semua response body API ( JSON mentah )** |
+| `api_snapshot` | **scraping killer: ambil semua response body API ( JSON mentah )** |
 | `watch_response` | tunggu endpoint spesifik, ambil body JSON-nya |
 | `block_junk` | block image/font/css/analytics, ringankan load |
+| `session_status` | domain apa yang punya cookie tersimpan |
+| `session_save` | simpan cookie tab aktif buat domain |
+| `session_restore` | pulihkan cookie tersimpan — login sekali saja |
+| `gmail_inbox` | baca inbox Gmail via API ( tanpa browser ) |
+| `gmail_search` | cari di Gmail pakai query Gmail |
+| `todo_summary` | ringkasan Microsoft To Do ( Graph API ) |
+
+## Auth layer
+
+Kredensial **tidak pernah diketik agent** — semua lewat vault:
+
+- `vault.py` — vault lokal terenkripsi (`/root/.cloak-use/vault.json`),
+  simpan kredensial + session cookie per domain.
+- `session_manager.py` — save/restore cookie via CDP. Login sekali,
+  `session_restore` bikin 7 hari tanpa login ulang.
+- `auto_auth.py` — deteksi form login → eskalasi kredensial via
+  `vault-ask` ( form PWA, Bos submit dari HP ) → `fill_fields` mengisi
+  form **tanpa auto-submit**. Submit tetap keputusan sadar
+  (`click_text` / `eval`). Kalau vault-ask down → fallback minta
+  kredensial ke Bos via chat.
+- `auth.py` + `gmail_reader.py` + `todo_reader.py` — OAuth2/MSAL token
+  refresh otomatis, API access tanpa browser. ( Kalau token revoked,
+  re-auth sekali via browser login + simpan token lagi. )
 
 ## Network layer: keunggulan utama untuk scraping
 

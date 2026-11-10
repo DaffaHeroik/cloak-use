@@ -171,6 +171,111 @@ TOOLS = [
             "properties": {"on": {"type": "boolean", "default": True}},
         },
     },
+    {
+        "name": "wait_for_text",
+        "description": "Tunggu sampai teks MUNCUL di halaman (atau HILANG kalau expect_gone). Poll DOM 300ms, murah. Pakai setelah klik/navigate buat nungguin hasil render. Return found=true/false + body_tail kalau timeout.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "timeout": {"type": "integer", "default": 30},
+                "expect_gone": {"type": "boolean", "default": False},
+            },
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "press_key",
+        "description": "Tekan tombol keyboard (Enter, Tab, Escape, dll) di tab aktif.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"key": {"type": "string"}},
+            "required": ["key"],
+        },
+    },
+    {
+        "name": "select_option",
+        "description": "Pilih option di <select> via CSS selector. React-friendly (native setter + change event).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "selector": {"type": "string"},
+                "value": {"type": "string"},
+            },
+            "required": ["selector", "value"],
+        },
+    },
+    {
+        "name": "upload_file",
+        "description": "Upload file lokal ke <input type=file> (CSS selector).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "selector": {"type": "string"},
+                "path": {"type": "string"},
+            },
+            "required": ["selector", "path"],
+        },
+    },
+    {
+        "name": "close_tab",
+        "description": "Tutup tab aktif (yang ter-attach) atau tab lain berdasarkan url_contains/index.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "url_contains": {"type": "string"},
+                "index": {"type": "integer"},
+            },
+        },
+    },
+    {
+        "name": "session_status",
+        "description": "Liat domain apa yang punya session cookie tersimpan (7 hari ke belakang).",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "session_save",
+        "description": "Simpan cookie tab aktif buat domain tertentu (setelah login sukses).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"domain": {"type": "string"}},
+            "required": ["domain"],
+        },
+    },
+    {
+        "name": "session_restore",
+        "description": "Pulihkan cookie tersimpan buat domain — login sekali, gak perlu ulang.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"domain": {"type": "string"}},
+            "required": ["domain"],
+        },
+    },
+    {
+        "name": "gmail_inbox",
+        "description": "Baca inbox Gmail via API (tanpa browser). Return 10 email terbaru: from, subject, date, snippet, unread.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"max_results": {"type": "integer", "default": 10}},
+        },
+    },
+    {
+        "name": "gmail_search",
+        "description": "Cari di Gmail pakai query Gmail (from:, subject:, in:inbox, dsb).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "max_results": {"type": "integer", "default": 20},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "todo_summary",
+        "description": "Ringkasan Microsoft To Do: list + jumlah task + overdue (via Graph API, tanpa browser).",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
 ]
 
 
@@ -188,6 +293,15 @@ def _get_loop():
 
 async def dispatch(name, args):
     args = args or {}
+    # tool yang butuh koneksi tab aktif — auto-attach kalau belum ada
+    _NEEDS_TAB = {
+        "goto", "goto_fast", "read_page", "click_text", "fill", "scroll",
+        "eval", "screenshot", "api_snapshot", "watch_response", "block_junk",
+        "wait_for_text", "press_key", "select_option", "upload_file",
+        "session_save",
+    }
+    if name in _NEEDS_TAB and cloak._ws is None:
+        cloak.ensure_attached(args.get("url_contains"))
     if name == "browser_status":
         try:
             tabs = cloak.list_tabs()
@@ -246,6 +360,41 @@ async def dispatch(name, args):
         )
     if name == "block_junk":
         return cloak.block_junk(on=args.get("on", True))
+    if name == "wait_for_text":
+        return cloak.wait_for_text(
+            text=args["text"],
+            timeout=args.get("timeout", 30),
+            expect=not args.get("expect_gone", False),
+        )
+    if name == "press_key":
+        return cloak.press_key(args["key"])
+    if name == "select_option":
+        return cloak.select_option(args["selector"], args["value"])
+    if name == "upload_file":
+        return cloak.upload_file(args["selector"], args["path"])
+    if name == "close_tab":
+        return cloak.close_tab(url_contains=args.get("url_contains"), index=args.get("index"))
+    if name == "session_status":
+        from vault import _load
+        data = _load()
+        return {d: s.get("saved_at", "") for d, s in data.get("sessions", {}).items()}
+    if name == "session_save":
+        from session_manager import save_current_session
+        return {"saved": save_current_session(args["domain"])}
+    if name == "session_restore":
+        from session_manager import restore_session, is_session_valid
+        if not is_session_valid(args["domain"]):
+            return {"restored": False, "reason": "session tidak ada atau sudah > 7 hari"}
+        return {"restored": restore_session(args["domain"])}
+    if name == "gmail_inbox":
+        import gmail_reader
+        return {"messages": gmail_reader.inbox_summary(args.get("max_results", 10))}
+    if name == "gmail_search":
+        import gmail_reader
+        return {"messages": gmail_reader.search(args["query"], args.get("max_results", 20))}
+    if name == "todo_summary":
+        import todo_reader
+        return {"summary": todo_reader.summary()}
     raise ValueError(f"unknown tool: {name}")
 
 
