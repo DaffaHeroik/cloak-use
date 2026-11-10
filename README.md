@@ -1,173 +1,187 @@
-# Web automation untuk AI agent, text-first.
+# cloak-use
 
-**Browser Use untuk browser** — tapi 10-100x lebih cepat dan 99% lebih murah.
+**Browser untuk AI agent — text-first, bukan screenshot.**
 
-Browser Use lambat karena **screenshot-driven**: setiap langkah butuh round trip
-ke vision model dengan token gambar. cloak-use baca halaman sebagai **teks**
-lewat Accessibility tree ( struktur DOM yang sama yang dipake screen reader ),
-lalu kasih ke agent sebagai JSON. 90% kasus web automation gak butuh screenshot.
+MCP server + engine CDP + CLI + daemon + auth layer, semua di 1 repo.
+BACA halaman lewat Accessibility tree sebagai **teks**: 1 halaman ≈ 2 detik,
+~500 token. Bandingkan screenshot-driven agent (Browser Use): 5-30 detik per
+langkah + ribuan token gambar. **90% lebih cepat, 99% lebih murah** untuk 90%
+kasus web automation.
 
-Bukan headless — ini ngopersiapkan **browser asli yang sudah login** (
-Groq, GitHub, Telegram Web, apa saja yang session-nya tersimpan ). Artinya:
+```
+          ┌─────────────────────────────────────────────────────┐
+          │  Browser Cloak (anti-detect, profil login asli)     │
+          │  CDP :9222                                          │
+          └──────────────┬──────────────────────┬───────────────┘
+                         │                      │
+              ┌──────────▼──────────┐   ┌───────▼─────────────┐
+              │ cloak.py (engine)   │   │ cbd (daemon unix-    │
+              │ CDP websocket       │   │ socket, ~0.02s/kick) │
+              │ + 26 tools MCP      │   └───────┬─────────────┘
+              │ (server.py)         │           │
+              └──────────┬──────────┘   ┌───────▼─────────────┐
+                         │             │ cb (CLI manusia)     │
+              ┌──────────▼──────────┐  └─────────────────────┘
+              │ Auth layer          │
+              │ vault + auto_auth   │
+              │ + Gmail/To Do API   │
+              └─────────────────────┘
+```
 
-- Tidak perlu re-login, cookie real, fingerprint real.
-- **Turnstile/anti-bot sering solve sendiri** karena browser-nya klien asli.
-- Login flow, OTP, password manager — semua handled by browser manusia.
+## Kenapa bukan Browser Use / Playwright?
 
-## Performance ( measured, GitHub + Groq console + Ryfinite dashboard )
-
-| Operasi | cloak-use | Browser Use ( est ) |
+| | cloak-use | Browser Use |
 |---|---|---|
-| Attach + baca tab existing | **354ms** ( 0.35s ) | 30-60s |
-| Gmail flow ( inbox 10 email ) | **0.39s** | 30-60s |
-| js() evaluate | **51ms** | n/a |
-| Buka tab baru + load SPA | 4-8s | 15-30s |
-| Full agent loop ( read→click→verify ) | **9.3s, ~170 tok** | 45-120s, 5-20K tok |
+| Representasi halaman | AX tree → **teks** | screenshot → vision model |
+| 1 langkah | ~1-5 detik | 5-30 detik |
+| Token | ~100-500 / halaman | ribuan token gambar |
+| Login | pakai browser **sudah login** | sering harus re-login |
+| Anti-bot | fingerprint asli, Turnstile sering lolos sendiri | gampang ke-flag |
 
-**90% lebih cepat, 99% lebih murah.**
+Playwright: script manual per situs, agent gak bisa ambil keputusan dinamis.
 
-Kenapa cepat: zero screenshot, zero vision round trip. AX tree itu tree
-traversal lokal di browser; text result langsung masuk LLM context sebagai
-JSON kecil. Screenshot dipakai **hanya jika explicit** — canvas, chart, map.
+## Komponen
 
-## Install
+| File | Fungsi |
+|---|---|
+| `cloak.py` | Engine CDP: tab management, AX tree reading, network layer |
+| `server.py` | **MCP server (stdio) — 26 tools** |
+| `bin/cb` | CLI text-first buat manusia + agent shell |
+| `bin/cbd` | Daemon unix-socket — 1 koneksi CDP permanen, ~0.02s per command |
+| `auth.py` | OAuth2/MSAL token refresh (Gmail, Microsoft To Do) |
+| `gmail_reader.py` / `todo_reader.py` | API reader, tanpa browser |
+| `vault.py` | Vault kredensial + cookie (XOR obfuscation, lihat docs) |
+| `auto_auth.py` | Deteksi form login → eskalasi kredensial → **fill tanpa auto-submit** |
+| `session_manager.py` | Save/restore cookie via CDP — login sekali |
+| `flow.py` | Contoh multi-step flow di 1 process (demo agent loop) |
+| `tests/` | Smoke test tanpa browser |
+
+## Quick start
 
 ```bash
 git clone https://github.com/DaffaHeroik/cloak-use.git
 cd cloak-use
-pip install websocket-client
-python3 setup_check.py
-python3 server.py serve
+pip install -r requirements.txt          # cuma websocket-client
+python3 setup_check.py                  # cek: browser CDP :9222 hidup?
+bash scripts/install.sh                  # (opsional) symlink cb + cbd ke /usr/local/bin
 ```
 
-Butuh: browser Chrome/Chromium dengan `--remote-debugging-port=9222` (
-`Cloak` / anti-detect browser ) di mesin yang sama.
+Butuh: 1 browser dengan `--remote-debugging-port=9222` di mesin yang sama.
 
-## Tools (25)
-
-| Tool | Kegunaan |
-|---|---|
-| `browser_status` | status browser + daftar tab, jalankan pertama |
-| `list_tabs` | daftar tab ( url, title ) |
-| `open_tab` | buka URL di tab baru |
-| `attach_tab` | attach ke tab yang sudah terbuka |
-| `close_tab` | tutup tab aktif / tab tertentu |
-| `goto` | navigate tab aktif |
-| `goto_fast` | navigate + baca halaman dalam 1 putaran ( 34% faster ) |
-| `read_page` | **baca halaman sebagai teks** ( `include`: interactive/text/all ) |
-| `click_text` | klik element berdasarkan teks ( "Sign in", "Save" ) |
-| `fill` | isi input ( React-friendly ) |
-| `select_option` | pilih option di `<select>` |
-| `upload_file` | upload file ke `<input type=file>` |
-| `press_key` | tekan tombol keyboard ( Enter, Tab, Escape ) |
-| `wait_for_text` | **tunggu teks muncul/hilang** — poll DOM 300ms, murah |
-| `scroll` | scroll down/up |
-| `eval` | jalankan JavaScript ( power user ) |
-| `screenshot` | fallback untuk canvas/chart/map only |
-| `api_snapshot` | **scraping killer: ambil semua response body API ( JSON mentah )** |
-| `watch_response` | tunggu endpoint spesifik, ambil body JSON-nya |
-| `block_junk` | block image/font/css/analytics, ringankan load |
-| `session_status` | domain apa yang punya cookie tersimpan |
-| `session_save` | simpan cookie tab aktif buat domain |
-| `session_restore` | pulihkan cookie tersimpan — login sekali saja |
-| `gmail_inbox` | baca inbox Gmail via API ( tanpa browser ) |
-| `gmail_search` | cari di Gmail pakai query Gmail |
-| `todo_summary` | ringkasan Microsoft To Do ( Graph API ) |
-
-## Auth layer
-
-Kredensial **tidak pernah diketik agent** — semua lewat vault:
-
-- `vault.py` — vault lokal terenkripsi (`/root/.cloak-use/vault.json`),
-  simpan kredensial + session cookie per domain.
-- `session_manager.py` — save/restore cookie via CDP. Login sekali,
-  `session_restore` bikin 7 hari tanpa login ulang.
-- `auto_auth.py` — deteksi form login → eskalasi kredensial via
-  `vault-ask` ( form PWA, Bos submit dari HP ) → `fill_fields` mengisi
-  form **tanpa auto-submit**. Submit tetap keputusan sadar
-  (`click_text` / `eval`). Kalau vault-ask down → fallback minta
-  kredensial ke Bos via chat.
-- `auth.py` + `gmail_reader.py` + `todo_reader.py` — OAuth2/MSAL token
-  refresh otomatis, API access tanpa browser. ( Kalau token revoked,
-  re-auth sekali via browser login + simpan token lagi. )
-
-## Network layer: keunggulan utama untuk scraping
-
-SPA web3 / dashboard biasanya mengambil data dari API JSON. Daripada
-me-render halaman dan mem-parsing teks-nya, **ambi response body-nya secara
-langsung** — zero DOM parsing.
-
-Diukur di ryfinite.com/app:
-
-```
-api_snapshot  → 6 API calls, JSON terstruktur:
-  /api/user/me        → {user: {id, email, image, ...}}
-  /api/user/dashboard → tokens: ETH=0, RFN=0, USDT=0
-  /api/notifications  → {notifications: []}
-  /api/mine           → 3108 bytes
-```
-
-| Metode | Waktu | Token | Datanya |
-|---|---|---|---|
-| `api_snapshot` | 7.0s | ~1569 | **JSON terstruktur ( akurat ) |
-| `read_page` | 3.1s | ~151 | Teks UI ( harus diparse lagi ) |
-
-`read_page` untuk eksplorasi ( token sangat hemat ), `api_snapshot` saat
-butuh data akurat untuk scraping. Keduanya berbasis teks, keduanya 10-100x
-lebih murah dari Browser Use.
-
-`block_junk` memblokir 15+ resource sia-sia ( gambar/font/css/analytics )
-agar halaman lebih ringan — untuk situs yang bandwidth/stat-nya berat.
-
-## Contoh alur agent
-
-```
-1. browser_status      -> "18 tabs, Groq login, GitHub login"
-2. attach_tab(groq)    -> attach ke console.groq.com
-3. read_page           -> 94 lines: "button: Create API Key", "textbox: Display Name"
-4. click_text          -> klik "Create API Key"
-5. read_page           -> modal terbuka, ada textbox Display Name + Iframe Turnstile
-6. fill(selector, name)-> isi form
-7. click_text          -> klik Submit
-8. read_page           -> verify halaman berubah / API key muncul
-```
-
-Setiap langkah ~3 detik, semuanya teks. Browser Use menit-menitan.
-
-## Config
-
-| Env | Default | Kegunaan |
-|---|---|---|
-| `CLOAK_HOST` | `127.0.0.1` | host browser CDP |
-| `CLOAK_PORT` | `9222` | port CDP |
-
-MCP config ( OpenCode / Hermes / Claude / Cursor ):
+MCP config (OpenCode / Claude / Cursor / Hermes):
 
 ```json
 {
   "mcp": {
     "cloak-use": {
       "type": "local",
-      "command": ["/path/to/cloak-use/server.py", "serve"],
-      "enabled": true
+      "command": ["/path/to/cloak-use/server.py", "serve"]
     }
   }
 }
 ```
 
-## Kenapa tidak Browser Use / Playwright ?
+Debug tanpa MCP:
 
-- **Playwright** butuh script manual untuk setiap situs; tidak bisa dipanggil
-  agent secara dinamis.
-- **Browser Use** screenshot-driven: lambat + mahal.
-- ** cloak-use**: text-first, memanfaatkan browser yang sudah login,
-  Turnstile sering lewat sendiri, dan jika perlu screenshot tetap bisa.
+```bash
+python3 server.py call browser_status '{}'
+python3 server.py call read_page '{}'
+cb open https://example.com        # CLI
+```
 
-## Warning
+## Tools MCP (26)
 
-Browser ini punya session login asli. `eval` bisa menjalankan JS apa pun di
-domain tersebut. Jangan pointed ke situs yang belum dipercaya.
+| Tool | Kegunaan |
+|---|---|
+| `browser_status` | status browser + daftar tab, jalankan pertama |
+| `list_tabs` / `open_tab` / `attach_tab` / `close_tab` | manajemen tab |
+| `goto` | navigate tab aktif |
+| `goto_fast` | navigate + baca halaman dalam 1 putaran (34% lebih cepat) |
+| `read_page` | **baca halaman sebagai teks** (`include`: interactive/text/all) |
+| `click_text` | klik element berdasarkan teks, tanpa selector CSS |
+| `fill` / `select_option` / `upload_file` / `press_key` | input primitives (React-friendly) |
+| `wait_for_text` | tunggu teks muncul/hilang — poll DOM 300ms |
+| `scroll` / `eval` | scroll, JS arbitrary (power user) |
+| `screenshot` | fallback canvas/chart/map only |
+| `api_snapshot` | **scraping killer: semua response body API (JSON mentah)** |
+| `watch_response` | tunggu 1 endpoint spesifik, ambil body-nya |
+| `block_junk` | block image/font/css/analytics |
+| `session_status` / `session_save` / `session_restore` | cookie vault — login sekali |
+| `gmail_inbox` / `gmail_search` | Gmail API tanpa browser |
+| `todo_summary` | Microsoft To Do via Graph API |
 
-## License
+### Network layer — keunggulan utama untuk scraping
 
-MIT
+SPA mengambil data dari API JSON. Daripada render + parse DOM, ambil
+response body-nya langsung — zero DOM parsing:
+
+```
+api_snapshot  →  /api/user/me, /api/user/dashboard, /api/notifications
+                 JSON terstruktur, 7 detik, ~1.5K token
+read_page     →  teks UI, 3.1 detik, ~150 token (untuk eksplorasi)
+```
+
+## Auth layer
+
+Prinsip: **agent tidak pernah ngetik kredensial owner.**
+
+1. `vault.py` — simpan kredensial + cookie per domain. Setelah login pertama,
+   `session_restore` bikin 7 hari tanpa login ulang.
+2. `auto_auth.py` — deteksi form login yang nyata (email/password/OTP/captcha),
+   eskalasi via credential provider:
+   - `CLOAK_CREDENTIALS_CMD` (env) — command custom, return JSON
+     `{field: value}`. Escape hatch untuk PWA/secret manager/layanan lain.
+   - CLI `vault-ask` (kalau ada di PATH) — form nembak HP owner.
+   Hasilnya **di-fill, tidak di-submit**. Submit tetap keputusan sadar
+   (`click_text`/`eval`), owner yang kontrol.
+3. `auth.py` + `gmail_reader.py` + `todo_reader.py` — OAuth2 (Google) &
+   MSAL (Microsoft) token refresh otomatis, API tanpa browser.
+
+Setup token (opsional):
+
+```bash
+mkdir -p ~/.cloak-use
+# Google: OAuth2 client + refresh_token → google_token.json
+# Microsoft: MSAL cache → msal_token_cache.json
+# Override path: env GOOGLE_TOKEN_PATH / MSAL_TOKEN_PATH
+```
+
+## Performance (ukur)
+
+| Operasi | Waktu |
+|---|---|
+| Attach + baca tab existing | **354ms** |
+| `js()` evaluate | **51ms** |
+| Gmail flow (10 email via API) | **0.39s** |
+| `cb` via daemon cbd | **~0.02s** per command |
+| Buka tab baru + SPA load | 4-8s |
+| Full agent loop (read→click→verify) | **9.3s, ~170 token** |
+
+## Config
+
+| Env | Default | Kegunaan |
+|---|---|---|
+| `CLOAK_HOST` / `CLOAK_PORT` | `127.0.0.1` / `9222` | CDP target |
+| `CLOAK_USE_HOME` | `~/.cloak-use` | vault + cbd log |
+| `CLOAK_VAULT_KEY` | built-in | XOR key vault (override) |
+| `GOOGLE_TOKEN_PATH` | `~/.cloak-use/google_token.json` | token Google |
+| `MSAL_TOKEN_PATH` | `~/.cloak-use/msal_token_cache.json` | cache MSAL |
+| `CLOAK_CREDENTIALS_CMD` | — | credential provider custom |
+| `CB_CDP` / `CB_PROFILE` | `http://127.0.0.1:9222` / `~/.chrome-novnc` | cb |
+
+## Peringatan
+
+Browser target punya session login asli. `eval` bisa menjalankan JS apa pun
+di domain yang ter-attach. Jangan arahkan ke situs yang belum dipercaya.
+`vault.py` pakai XOR obfuscation (bukan enkripsi kriptografis) — jangan
+simpan kredensial kritis di situ, pakai secret manager.
+
+## Lisensi
+
+**AGPL-3.0** — open-source copyleft. Boleh gratis: lihat, modifikasi,
+pakai. Kalau kamu menurunkan/menjual layanan yang pakai kode ini,
+source-nya wajib dibuka (termasuk modifikasimu). Kode ini **tidak bisa
+masuk produk proprietary**. Konsultasi/jasa/hosting di atas kode ini
+tetap boleh — license melindungi kode, bukan jasa.
+
+Lihat `LICENSE`.

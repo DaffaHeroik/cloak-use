@@ -1,0 +1,25 @@
+[project]
+name = "cloak-use"
+version = "0.2.0"
+description = "Text-first browser automation for AI agents — CDP core, MCP server, auth layer, CLI + fast daemon"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "AGPL-3.0-or-later" }
+authors = [{ name = "Daffa Heroik" }]
+dependencies = ["websocket-client>=1.6"]
+
+[project.optional-dependencies]
+# cb (bin/cb) attach mode
+playwright = ["playwright>=1.40"]
+# cb launch mode (engine anti-detect)
+cloakbrowser = ["cloakbrowser"]
+
+[project.scripts]
+cb = "bin.cb:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["cloak", "server", "auth", "vault", "auto_auth", "session_manager", "gmail_reader", "todo_reader", "flow"]

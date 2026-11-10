@@ -1,14 +1,27 @@
 """
-Local credential vault — encrypted storage for login credentials.
-Auto-save after first login, auto-fill on subsequent visits.
-No Chrome sync needed.
+Local credential vault — obfuscated storage for login credentials + session
+cookies. Auto-save setelah login pertama, auto-fill di kunjungan berikutnya.
+JANGAN simpan hal yang benar-benar rahasia di sini (XOR+base64, bukan
+enkripsi kriptografis) — untuk kredensial penting pakai secret manager.
 """
-import json, os, base64, hashlib
-from pathlib import Path
+import base64
+import hashlib
+import json
+import os
 from datetime import datetime
+from pathlib import Path
 
-VAULT_PATH = Path("/root/.cloak-use/vault.json")
-VAULT_KEY = hashlib.sha256(b"cloak-use-vault-hero-2026").digest()  # fixed key for VPS
+VAULT_PATH = Path(os.environ.get(
+    "CLOAK_VAULT_PATH",
+    os.path.join(os.environ.get("CLOAK_USE_HOME",
+                                os.path.expanduser("~/.cloak-use")),
+                 "vault.json"),
+))
+# default fixed buat portofolio/VPS; override via CLOAK_VAULT_KEY kalau mau
+VAULT_KEY = (os.environ.get("CLOAK_VAULT_KEY")
+             or hashlib.sha256(b"cloak-use-vault-hero-2026").digest())
+if isinstance(VAULT_KEY, str):
+    VAULT_KEY = hashlib.sha256(VAULT_KEY.encode()).digest()
 
 def _encrypt(data: str) -> str:
     """Simple XOR + base64 (not military grade, but good enough for local VPS)."""

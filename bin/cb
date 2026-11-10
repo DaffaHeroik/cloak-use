@@ -1,0 +1,298 @@
+#!/usr/bin/env python3
+"""cb — satu browser CloakBrowser buat harian + agent. Text-first, bukan screenshot.
+
+MODE
+  attach  -> nempel ke browser yang SUDAH jalan (CDP :9222, profil login Bos)
+  launch  -> kalau gak ada browser hidup, nyalain sendiri (profil persisten)
+
+Perintah:
+  cb open <url> [selector]   buka url, cetak judul+url+teks
+  cb text [selector]         teks halaman / elemen (default body)
+  cb html [selector]         HTML elemen (max 20k)
+  cb eval <js>               jalankan JS, cetak hasil JSON
+  cb click <selector>        klik
+  cb fill <selector> <text>  isi input
+  cb press <key>             tekan tombol (Enter, Escape, ...)
+  cb tabs                    daftar tab
+  cb new <url>               tab baru
+  cb shot [path]             screenshot (fallback terakhir, lambat)
+  cb status                  info mode, profil, tab
+
+Env: CB_CDP (default http://127.0.0.1:9222), CB_PROFILE (default ~/.chrome-novnc),
+     CB_HEADLESS (default 0), CB_PROXY, CB_TAB (index tab, default 0)
+"""
+import json
+import os
+import sys
+
+os.environ.setdefault("CLOAKBROWSER_SUPPRESS_FONT_WARNING", "1")
+os.environ.setdefault("DISPLAY", ":99")
+
+CDP = os.environ.get("CB_CDP", "http://127.0.0.1:9222")
+PROFILE = os.environ.get("CB_PROFILE", os.path.join(os.path.expanduser("~"), ".chrome-novnc"))
+HEADLESS = os.environ.get("CB_HEADLESS", "0") == "1"
+PROXY = os.environ.get("CB_PROXY") or None
+TAB = int(os.environ.get("CB_TAB", "0"))
+
+
+def cdp_alive():
+    import urllib.request
+    try:
+        with urllib.request.urlopen(CDP + "/json/version", timeout=3) as r:
+            return json.loads(r.read().decode()).get("Browser", "")
+    except Exception:
+        return ""
+
+
+def _pick(context, req_url=None):
+    pages = [p for p in context.pages if not p.url.startswith("devtools://")]
+    if req_url:
+        for p in pages:
+            if p.url.rstrip("/") == req_url.rstrip("/"):
+                return p
+    return pages[TAB] if len(pages) > TAB else (pages[0] if pages else context.new_page())
+
+
+def with_page(fn):
+    from playwright.sync_api import sync_playwright
+    ver = cdp_alive()
+    with sync_playwright() as pw:
+        if ver:
+            b = pw.chromium.connect_over_cdp(CDP)
+            ctx = b.contexts[0] if b.contexts else b.new_context()
+            try:
+                return fn(ctx, "attach " + ver)
+            finally:
+                b.close()
+        import cloakbrowser
+        kw = dict(headless=HEADLESS, humanize=True, viewport={"width": 1600, "height": 1000},
+                  args=["--no-sandbox", "--no-first-run", "--no-default-browser-check"])
+        if PROXY:
+            kw["proxy"] = PROXY
+        ctx = cloakbrowser.launch_persistent_context(PROFILE, **kw)
+        try:
+            return fn(ctx, "launch persistent")
+        finally:
+            try:
+                ctx.close()
+            except Exception:
+                pass
+
+
+def _sock_path():
+    for p in (os.environ.get("CBD_SOCK"), "/run/cbd.sock", "/tmp/cbd.sock"):
+        if p and os.path.exists(p):
+            return p
+    return None
+
+
+def _ask(req, timeout=60):
+    """Kirim 1 request ke daemon cbd lewat unix socket. None kalau daemon mati."""
+    import socket as _s
+    p = _sock_path()
+    if not p:
+        return None
+    s = _s.socket(_s.AF_UNIX, _s.SOCK_STREAM)
+    s.settimeout(timeout)
+    try:
+        s.connect(p)
+        s.sendall((json.dumps(req, ensure_ascii=False) + "\n").encode())
+        buf = b""
+        while b"\n" not in buf:
+            ch = s.recv(65536)
+            if not ch:
+                break
+            buf += ch
+        return json.loads(buf.split(b"\n", 1)[0].decode())
+    except Exception:
+        return None
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
+def fast(c, args):
+    """Jalur cepat lewat cbd. Return True kalau ditangani, False kalau fallback."""
+    if os.environ.get("CB_NO_DAEMON") == "1":
+        return False
+    if c == "open":
+        url = args[0]
+        sel = args[1] if len(args) > 1 else "body"
+        r = _ask({"cmd": "goto", "url": url})
+        if r is None:
+            return False
+        if not r.get("ok"):
+            print("GAGAL:", r.get("error"))
+            return True
+        t = _ask({"cmd": "text", "sel": sel})
+        txt = (t or {}).get("text", "")
+        print("[daemon] TITLE: %s\nURL: %s\n%s\n%s" % (r.get("title"), r.get("url"), "-" * 40, txt[:8000]))
+        return True
+
+    simple = {"text": "text", "html": "html", "eval": "eval", "tabs": "tabs",
+              "title": "title", "shot": "shot"}
+    if c in simple:
+        req = {"cmd": simple[c]}
+        if c in ("text", "html"):
+            req["sel"] = args[0] if args else "body"
+        elif c == "eval":
+            req["expr"] = args[0]
+        elif c == "shot":
+            req["path"] = args[0] if args else "/tmp/cb_shot.png"
+        r = _ask(req)
+        if r is None:
+            return False
+        if not r.get("ok"):
+            print("GAGAL:", r.get("error"))
+            return True
+        if "text" in r:
+            print(r["text"])
+        elif "html" in r:
+            print(r["html"])
+        elif "value" in r:
+            v = r["value"]
+            print(v if isinstance(v, str) else json.dumps(v, ensure_ascii=False))
+        else:
+            print(json.dumps(r, ensure_ascii=False))
+        return True
+
+    if c == "click":
+        r = _ask({"cmd": "click", "sel": args[0], "real": "--real" in args})
+        if r is None:
+            return False
+        print("GAGAL: " + r["error"] if not r.get("ok") else "clicked %s (%s)" % (args[0], r.get("mode")))
+        return True
+
+    if c == "fill":
+        r = _ask({"cmd": "fill", "sel": args[0], "val": args[1]})
+        if r is None:
+            return False
+        print("GAGAL: " + r["error"] if not r.get("ok") else "filled %s" % args[0])
+        return True
+
+    if c == "press":
+        r = _ask({"cmd": "press", "key": args[0]})
+        if r is None:
+            return False
+        print("GAGAL: " + r["error"] if not r.get("ok") else "pressed %s" % args[0])
+        return True
+
+    if c == "new":
+        r = _ask({"cmd": "newtab", "url": args[0] if args else "about:blank"})
+        if r is None:
+            return False
+        print("GAGAL: " + r["error"] if not r.get("ok") else "new tab %s" % r.get("url"))
+        return True
+
+    return False
+
+
+def main():
+    a = sys.argv[1:]
+    if not a:
+        print(__doc__)
+        return
+    c = a[0]
+
+    # FAST PATH: daemon cbd (~0.02s) sebelum nyentuh playwright (~0.5s)
+    if c not in ("status",) and len(a) > 1 or c in ("text", "html", "tabs", "title", "shot"):
+        try:
+            if fast(c, a[1:]):
+                return
+        except IndexError:
+            pass
+
+    if c == "status":
+        ver = cdp_alive()
+        print(f"cdp    : {CDP} -> {ver or 'MATI (mode launch)'}")
+        print(f"profile: {PROFILE}")
+        print(f"display: {os.environ.get('DISPLAY')} headless={HEADLESS}")
+        return
+
+    if c == "tabs":
+        from playwright.sync_api import sync_playwright
+        if not cdp_alive():
+            sys.exit("browser mati - nyalain browser dengan --remote-debugging-port=9222 lalu coba lagi")
+        with sync_playwright() as pw:
+            b = pw.chromium.connect_over_cdp(CDP)
+            for i, p in enumerate(b.contexts[0].pages):
+                print(f"[{i}] {p.url[:110]}")
+            b.close()
+        return
+
+    if c == "open":
+        url = a[1]
+        sel = a[2] if len(a) > 2 else "body"
+
+        def f(ctx, mode):
+            pg = _pick(ctx, url) if ctx.pages else ctx.new_page()
+            pg.goto(url, timeout=60000, wait_until="domcontentloaded")
+            pg.wait_for_timeout(800)
+            try:
+                txt = pg.inner_text(sel)
+            except Exception:
+                txt = pg.inner_text("body")
+            return "[%s] TITLE: %s\nURL: %s\n%s\n%s" % (mode, pg.title(), pg.url, "-" * 40, txt[:8000])
+    elif c == "text":
+        sel = a[1] if len(a) > 1 else "body"
+
+        def f(ctx, mode):
+            return (_pick(ctx).inner_text(sel) or "")[:8000]
+    elif c == "html":
+        sel = a[1] if len(a) > 1 else "body"
+
+        def f(ctx, mode):
+            return (_pick(ctx).inner_html(sel) or "")[:20000]
+    elif c == "eval":
+        js = a[1]
+
+        def f(ctx, mode):
+            return json.dumps(_pick(ctx).evaluate(js), ensure_ascii=False)[:20000]
+    elif c == "click":
+        sel = a[1]
+
+        def f(ctx, mode):
+            pg = _pick(ctx)
+            pg.click(sel, timeout=20000)
+            pg.wait_for_timeout(600)
+            return "clicked %s :: %s" % (sel, pg.url)
+    elif c == "fill":
+        sel, val = a[1], a[2]
+
+        def f(ctx, mode):
+            _pick(ctx).fill(sel, val, timeout=20000)
+            return "filled %s" % sel
+    elif c == "press":
+        key = a[1]
+
+        def f(ctx, mode):
+            pg = _pick(ctx)
+            pg.keyboard.press(key)
+            pg.wait_for_timeout(400)
+            return "pressed %s" % key
+    elif c == "new":
+        url = a[1] if len(a) > 1 else "about:blank"
+
+        def f(ctx, mode):
+            pg = ctx.new_page()
+            if url != "about:blank":
+                pg.goto(url, timeout=60000, wait_until="domcontentloaded")
+            return "new tab %s" % pg.url
+    elif c == "shot":
+        out = a[1] if len(a) > 1 else "/tmp/cb_shot.png"
+
+        def f(ctx, mode):
+            pg = _pick(ctx)
+            pg.screenshot(path=out, full_page=False)
+            return "saved %s :: %s" % (out, pg.title())
+    else:
+        print(__doc__)
+        return
+
+    print(with_page(f))
+
+
+if __name__ == "__main__":
+    main()

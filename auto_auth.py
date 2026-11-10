@@ -1,25 +1,26 @@
 """
-Auto-auth for cloak-use — deteksi form login, eskalasi kredensial via vault-ask,
-isi form dari vault / hasil vault-ask. JANGAN auto-submit: submit = keputusan
-sadar, pakai click_text / eval.
-
-Aturan standing (CLAUDE.md):
-  1. Jangan pernah ngetik kredensial Bos sendiri — eskalasi via vault-ask.
-  2. Form vault-ask harus SESUAI form yang ditemui (ada OTP minta OTP,
-     ada captcha minta jawaban captcha, dsb).
-  3. vault-ask down → fallback: minta langsung ke Bos via chat.
+Auto-auth for cloak-use — deteksi form login, eskalasi kredensial via
+credential provider, isi form dari vault / hasil provider. TANPA auto-submit:
+submit = keputusan sadar, pakai click_text / eval.
 
 Alur:
-  detect_login_form()      → info field apa yang dibutuhkan di halaman ini
-  escalate_credentials()   → vault-ask (add+wait) atau local vault; return dict values
-  fill_fields(values)      → isi form (tanpa submit), pakai cloak.fill_input
-  save_session_after_login()→ simpan cookie setelah Bos verifikasi sukses
+  detect_login_form()        → field apa yang dibutuhkan halaman ini
+  escalate_credentials()     → CLOAK_CREDENTIALS_CMD atau CLI vault-ask
+  fill_fields(values)        → isi form via cloak.fill_input (tanpa submit)
+  check_login_result()       → heuristik pasca-submit
+  save_session_after_login() → simpan cookie, login sekali cukup
 """
 import json
+import os
+import shutil
 import subprocess
 
 import cloak
 from vault import get_credential, save_session
+
+
+class CredentialProviderError(RuntimeError):
+    """Gagal escalate kredensial (provider gak ada / Bos gak submit)."""
 
 # field type yang bisa muncul di form (subset umum)
 _FIELD_DETECTOR = """
@@ -90,10 +91,16 @@ def _vault_field_spec(f):
 
 
 def escalate_credentials(context=""):
-    """Minta kredensial dari vault-ask, sesuai form yang terdeteksi.
+    """Minta kredensial sesuai form yang terdeteksi.
 
-    Return: {values: {field_name: value}, source: 'vault-ask'}
-    Throw: vault-ask gagal/down (caller fallback: tanya Bos via chat).
+    Provider (urutan):
+      1. env CLOAK_CREDENTIALS_CMD — command custom. Terima 1 arg: JSON
+         {"specs": [...], "context": "..."}; harus return JSON
+         {field_name: value} di stdout. Ini escape hatch untuk mesin
+         yang gak punya vault-ask (PWA, secret manager, dsb).
+      2. CLI vault-ask di PATH (default, ekosistem hero-app Bos) —
+         add+wait, form nembak HP.
+      3. gak ada dua-duanya → CredentialProviderError dengan panduan.
     """
     fields = _pick_fields(detect_login_form())
     if not fields:
@@ -101,15 +108,36 @@ def escalate_credentials(context=""):
     specs = [_vault_field_spec(f) for f in fields]
     ctx = context or f"login {cloak.js('location.host')}"
 
-    # vault-ask add → JSON dengan id (stderr ada "askId:"; stdout = body+id dari CLI)
+    custom = os.environ.get("CLOAK_CREDENTIALS_CMD", "").strip()
+    if custom:
+        payload = json.dumps({"specs": specs, "context": ctx})
+        r = subprocess.run(custom, shell=True, input=payload,
+                           capture_output=True, text=True, timeout=900)
+        if r.returncode != 0:
+            raise CredentialProviderError(
+                f"CLOAK_CREDENTIALS_CMD exit {r.returncode}: {r.stderr.strip()[:200]}")
+        try:
+            values = json.loads(r.stdout.strip() or "{}")
+        except json.JSONDecodeError:
+            values = {fields[0].get("name") or "password": r.stdout.strip()}
+        return {"values": values, "source": "CLOAK_CREDENTIALS_CMD"}
+
+    if shutil.which("vault-ask"):
+        return _escalate_via_vault_ask(specs, ctx, fields)
+    raise CredentialProviderError(
+        "vault-ask tidak tersedia di PATH dan CLOAK_CREDENTIALS_CMD belum set. "
+        "Pilih: (a) pasang vault-ask (ekosistem hero-app), (b) set CLOAK_CREDENTIALS_CMD "
+        "ke command yang return JSON {field: value}, (c) minta kredensial ke owner via chat.")
+
+
+def _escalate_via_vault_ask(specs, ctx, fields):
     r = subprocess.run(
         ["vault-ask", "add"] + specs + ["--ctx", ctx],
         capture_output=True, text=True, timeout=60,
     )
     if r.returncode != 0:
-        raise RuntimeError(f"vault-ask add gagal (down?): {r.stderr.strip()[:200]} — fallback: minta kredensial ke Bos via chat")
-    # CLI print body JSON + baris "askId: ..." ke stderr; id ada di JSON? Tidak —
-    # ambil dari stderr, fallback parse last stdout line.
+        raise CredentialProviderError(
+            f"vault-ask add gagal (server down?): {r.stderr.strip()[:200]}")
     ask_id = ""
     for line in r.stderr.splitlines():
         if line.startswith("askId:"):
@@ -121,19 +149,21 @@ def escalate_credentials(context=""):
         except Exception:
             pass
     if not ask_id:
-        raise RuntimeError(f"vault-ask add tidak menghasilkan askId: {r.stdout[:200]}")
+        raise CredentialProviderError(
+            f"vault-ask add tidak menghasilkan askId: {r.stdout[:200]}")
 
     w = subprocess.run(
         ["vault-ask", "wait", ask_id, "--timeout", "600"],
         capture_output=True, text=True, timeout=660,
     )
     if w.returncode != 0:
-        raise RuntimeError(f"vault-ask wait gagal: {w.stderr.strip()[:200]} — fallback: minta kredensial ke Bos via chat")
+        raise CredentialProviderError(
+            f"vault-ask wait gagal/batal: {w.stderr.strip()[:200]}")
     out = w.stdout.strip()
     try:
         values = json.loads(out)  # multi-field
     except json.JSONDecodeError:
-        values = {fields[0]["name"] or "password": out}  # single-field = teks polos
+        values = {(fields[0].get("name") or "password"): out}  # single-field
     return {"values": values, "source": "vault-ask"}
 
 

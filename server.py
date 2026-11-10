@@ -387,14 +387,26 @@ async def dispatch(name, args):
             return {"restored": False, "reason": "session tidak ada atau sudah > 7 hari"}
         return {"restored": restore_session(args["domain"])}
     if name == "gmail_inbox":
-        import gmail_reader
-        return {"messages": gmail_reader.inbox_summary(args.get("max_results", 10))}
+        try:
+            import gmail_reader
+            return {"messages": gmail_reader.inbox_summary(args.get("max_results", 10))}
+        except Exception as e:
+            return {"error": f"gmail: {e}",
+                    "hint": "token Google belum di-setup — salin google_token.json ke ~/.cloak-use/ (env GOOGLE_TOKEN_PATH), lihat README"}
     if name == "gmail_search":
-        import gmail_reader
-        return {"messages": gmail_reader.search(args["query"], args.get("max_results", 20))}
+        try:
+            import gmail_reader
+            return {"messages": gmail_reader.search(args["query"], args.get("max_results", 20))}
+        except Exception as e:
+            return {"error": f"gmail: {e}",
+                    "hint": "token Google belum di-setup — salin google_token.json ke ~/.cloak-use/ (env GOOGLE_TOKEN_PATH), lihat README"}
     if name == "todo_summary":
-        import todo_reader
-        return {"summary": todo_reader.summary()}
+        try:
+            import todo_reader
+            return {"summary": todo_reader.summary()}
+        except Exception as e:
+            return {"error": f"todo: {e}",
+                    "hint": "token Microsoft belum di-setup — salin msal_token_cache.json ke ~/.cloak-use/ (env MSAL_TOKEN_PATH), lihat README"}
     raise ValueError(f"unknown tool: {name}")
 
 

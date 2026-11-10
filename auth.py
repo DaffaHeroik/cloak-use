@@ -1,12 +1,21 @@
 """
-Auth layer — OAuth2 token management for Gmail + Microsoft + GitHub.
+Auth layer — OAuth2 token management for Gmail + Microsoft.
 Reads tokens from disk, refreshes when needed, never asks for passwords.
+Paths overridable via env (default ~/.cloak-use/):
+  GOOGLE_TOKEN_PATH, MSAL_TOKEN_PATH
 """
-import json, time, os, urllib.request, urllib.error
+import json
+import os
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
 
-SECRETS_DIR = "/root/hero-secrets"
-GOOGLE_TOKEN_PATH = "/root/.hermes/google_token.json"
-MSAL_TOKEN_PATH = "/root/.azure/msal_token_cache.json"
+DEFAULT_HOME = Path(os.path.expanduser("~/.cloak-use"))
+GOOGLE_TOKEN_PATH = os.environ.get(
+    "GOOGLE_TOKEN_PATH", str(DEFAULT_HOME / "google_token.json"))
+MSAL_TOKEN_PATH = os.environ.get(
+    "MSAL_TOKEN_PATH", str(DEFAULT_HOME / "msal_token_cache.json"))
 
 # --- Google OAuth2 ---
 

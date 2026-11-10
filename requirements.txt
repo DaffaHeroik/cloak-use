@@ -1,1 +1,9 @@
+# core (wajib)
 websocket-client>=1.6
+
+# cb (bin/cb) attach mode — Playwright CDP
+# playwright>=1.40
+# (lalu: playwright install chromium, atau attach ke browser CDP yang sudah jalan)
+
+# cb launch mode — engine anti-detect (ekosistem CloakBrowser)
+# cloakbrowser

@@ -13,10 +13,11 @@ Usage:
     python3 flow.py gmail_check
 """
 import json
+import os
 import sys
 import time
 
-sys.path.insert(0, "/root/cloak-use")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cloak
 
 
