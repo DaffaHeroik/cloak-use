@@ -2,11 +2,16 @@
 
 **Browser untuk AI agent — text-first, bukan screenshot.**
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-blue.svg)](https://www.python.org)
+
 MCP server + engine CDP + CLI + daemon + auth layer, semua di 1 repo.
 BACA halaman lewat Accessibility tree sebagai **teks**: 1 halaman ≈ 2 detik,
 ~500 token. Bandingkan screenshot-driven agent (Browser Use): 5-30 detik per
 langkah + ribuan token gambar. **90% lebih cepat, 99% lebih murah** untuk 90%
 kasus web automation.
+
+Contribute? Baca [CONTRIBUTING.md](CONTRIBUTING.md) — issue & PR disambut.
 
 ```
           ┌─────────────────────────────────────────────────────┐
@@ -176,12 +181,13 @@ di domain yang ter-attach. Jangan arahkan ke situs yang belum dipercaya.
 `vault.py` pakai XOR obfuscation (bukan enkripsi kriptografis) — jangan
 simpan kredensial kritis di situ, pakai secret manager.
 
+## Contributing
+
+Bugs, feature request, dan koreksi di [issues](../../issues).
+PR: fork → branch → `python3 tests/test_smoke.py` (harus semua PASS) → PR.
+Detail: [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Lisensi
 
-**AGPL-3.0** — open-source copyleft. Boleh gratis: lihat, modifikasi,
-pakai. Kalau kamu menurunkan/menjual layanan yang pakai kode ini,
-source-nya wajib dibuka (termasuk modifikasimu). Kode ini **tidak bisa
-masuk produk proprietary**. Konsultasi/jasa/hosting di atas kode ini
-tetap boleh — license melindungi kode, bukan jasa.
-
-Lihat `LICENSE`.
+**MIT** — bebas dipakai, dimodifikasi, didistribusikan, bahkan untuk produk
+komersial. Syarat: copyright notice tetap ada.

@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install websocket-client
+      - name: Smoke tests (no browser needed)
+        run: python3 tests/test_smoke.py
+      - name: Compile all modules
+        run: python3 -m py_compile cloak.py server.py auth.py vault.py auto_auth.py session_manager.py gmail_reader.py todo_reader.py flow.py
+      - name: bin syntax check
+        run: python3 -m py_compile bin/cb bin/cbd
