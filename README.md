@@ -61,6 +61,18 @@ Playwright: script manual per situs, agent gak bisa ambil keputusan dinamis.
 | `flow.py` | Contoh multi-step flow di 1 process (demo agent loop) |
 | `tests/` | Smoke test tanpa browser |
 
+## Docker
+
+Server-nya bisa jalan di container; browser CDP tetap di mesin utama
+(atau di container lain yang di-attach lewat `CLOAK_HOST`):
+
+```bash
+docker build -t cloak-use .
+docker run -i --rm   -e CLOAK_HOST=host.docker.internal -e CLOAK_PORT=9222   cloak-use
+# config MCP: command ["docker","run","-i","--rm",
+#   "-e","CLOAK_HOST=host.docker.internal","cloak-use"]
+```
+
 ## Quick start
 
 ```bash

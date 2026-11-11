@@ -1,0 +1,9 @@
+.git
+.gitignore
+__pycache__/
+*.pyc
+*.md
+tests/
+.claude/
+tunnel-url.txt
+*.log
