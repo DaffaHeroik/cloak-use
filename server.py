@@ -252,6 +252,17 @@ TOOLS = [
         },
     },
     {
+        "name": "session_guard",
+        "description": "Cek + pulihkan sesi SSO (google/microsoft/github): detect logout diam-diam, auto-restore cookie dari vault. Jalankan bila ragu session live.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "domains": {"type": "array", "items": {"type": "string"},
+                            "description": "default: google, microsoft, github"},
+            },
+        },
+    },
+    {
         "name": "gmail_inbox",
         "description": "Baca inbox Gmail via API (tanpa browser). Return 10 email terbaru: from, subject, date, snippet, unread.",
         "inputSchema": {
@@ -386,6 +397,9 @@ async def dispatch(name, args):
         if not is_session_valid(args["domain"]):
             return {"restored": False, "reason": "session tidak ada atau sudah > 7 hari"}
         return {"restored": restore_session(args["domain"])}
+    if name == "session_guard":
+        import session_guard
+        return session_guard.run_check(args.get("domains"))
     if name == "gmail_inbox":
         try:
             import gmail_reader
