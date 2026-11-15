@@ -22,4 +22,4 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["cloak", "server", "auth", "vault", "auto_auth", "session_manager", "gmail_reader", "todo_reader", "flow"]
+py-modules = ["cloak", "server", "auth", "vault", "auto_auth", "session_manager", "gmail_reader", "todo_reader", "flow", "session_guard", "setup_check"]
