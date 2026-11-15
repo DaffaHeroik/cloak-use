@@ -4,6 +4,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-blue.svg)](https://www.python.org)
+[![CI](https://github.com/DaffaHeroik/cloak-use/actions/workflows/ci.yml/badge.svg)](https://github.com/DaffaHeroik/cloak-use/actions/workflows/ci.yml)
+[![Glama: cloak-use](https://glama.ai/mcp/servers/DaffaHeroik/cloak-use/badges/score.svg)](https://glama.ai/mcp/servers/DaffaHeroik/cloak-use)
+[![MCP](https://img.shields.io/badge/MCP-27%20tools-0e1618.svg)](https://modelcontextprotocol.io)
 
 MCP server + engine CDP + CLI + daemon + auth layer, semua di 1 repo.
 BACA halaman lewat Accessibility tree sebagai **teks**: 1 halaman ≈ 2 detik,
