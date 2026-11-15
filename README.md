@@ -78,7 +78,7 @@ docker run -i --rm   -e CLOAK_HOST=host.docker.internal -e CLOAK_PORT=9222   clo
 ```bash
 git clone https://github.com/DaffaHeroik/cloak-use.git
 cd cloak-use
-pip install -r requirements.txt          # cuma websocket-client
+pip install -e .                        # atau: pip install -r requirements.txt (cuma websocket-client)
 python3 setup_check.py                  # cek: browser CDP :9222 hidup?
 bash scripts/install.sh                  # (opsional) symlink cb + cbd ke /usr/local/bin
 ```

@@ -18,6 +18,16 @@ jobs:
       - name: Smoke tests (no browser needed)
         run: python3 tests/test_smoke.py
       - name: Compile all modules
-        run: python3 -m py_compile cloak.py server.py auth.py vault.py auto_auth.py session_manager.py gmail_reader.py todo_reader.py flow.py
+        run: python3 -m py_compile cloak.py server.py auth.py vault.py auto_auth.py session_manager.py gmail_reader.py todo_reader.py flow.py session_guard.py setup_check.py
       - name: bin syntax check
         run: python3 -m py_compile bin/cb bin/cbd
+      - name: Build wheel
+        run: |
+          pip install build
+          python3 -m build --wheel -q
+      - name: Install wheel + import all modules
+        run: |
+          python3 -m venv /tmp/ci-venv
+          /tmp/ci-venv/bin/pip install -q websocket-client dist/*.whl
+          /tmp/ci-venv/bin/python -c "import cloak, server, auth, vault, auto_auth, session_manager, gmail_reader, todo_reader, flow, session_guard, setup_check; print('11 modul import OK')"
+          /tmp/ci-venv/bin/python -c "import server; assert len(server.TOOLS) == 27, len(server.TOOLS); print('27 tools OK')"
