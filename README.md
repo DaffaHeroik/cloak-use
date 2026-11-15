@@ -22,7 +22,7 @@ Contribute? Baca [CONTRIBUTING.md](CONTRIBUTING.md) — issue & PR disambut.
               ┌──────────▼──────────┐   ┌───────▼─────────────┐
               │ cloak.py (engine)   │   │ cbd (daemon unix-    │
               │ CDP websocket       │   │ socket, ~0.02s/kick) │
-              │ + 26 tools MCP      │   └───────┬─────────────┘
+              │ + 27 tools MCP      │   └───────┬─────────────┘
               │ (server.py)         │           │
               └──────────┬──────────┘   ┌───────▼─────────────┐
                          │             │ cb (CLI manusia)     │
@@ -50,7 +50,7 @@ Playwright: script manual per situs, agent gak bisa ambil keputusan dinamis.
 | File | Fungsi |
 |---|---|
 | `cloak.py` | Engine CDP: tab management, AX tree reading, network layer |
-| `server.py` | **MCP server (stdio) — 26 tools** |
+| `server.py` | **MCP server (stdio) — 27 tools** |
 | `bin/cb` | CLI text-first buat manusia + agent shell |
 | `bin/cbd` | Daemon unix-socket — 1 koneksi CDP permanen, ~0.02s per command |
 | `auth.py` | OAuth2/MSAL token refresh (Gmail, Microsoft To Do) |
@@ -106,7 +106,7 @@ python3 server.py call read_page '{}'
 cb open https://example.com        # CLI
 ```
 
-## Tools MCP (26)
+## Tools MCP (27)
 
 | Tool | Kegunaan |
 |---|---|
@@ -124,6 +124,7 @@ cb open https://example.com        # CLI
 | `watch_response` | tunggu 1 endpoint spesifik, ambil body-nya |
 | `block_junk` | block image/font/css/analytics |
 | `session_status` / `session_save` / `session_restore` | cookie vault — login sekali |
+| `session_guard` | auto-heal sesi SSO (google/microsoft/github) — jalan via systemd timer tiap 30 menit |
 | `gmail_inbox` / `gmail_search` | Gmail API tanpa browser |
 | `todo_summary` | Microsoft To Do via Graph API |
 
